@@ -1,57 +1,61 @@
-import { GetInfoResponse, MintKeys, MintKeyset, Proof } from "@cashu/cashu-ts";
+import { GetInfoResponse, MintKeys, MintKeyset } from "@cashu/cashu-ts";
 
-export enum CashuStorageKey {
+export interface Mint {
+  url: string;
+  info: GetInfoResponse;
+  keys: Array<MintKeys>;
+  keysets: Array<MintKeyset>;
+  nickname?: string;
+}
+
+export interface KeysetCounter {
+  id: string;
+  counter: number;
+}
+
+export interface HistoryToken {
+  status: "pending" | "paid";
+  token: string;
+  amount: number;
+  unit: string;
+  date: Date;
+}
+
+export interface InvoiceHistoryItem {
+  amount: number;
+  bolt11: string;
+  hash: string | null;
+  memo: string | null;
+  mint: string;
+  quote: string;
+  status: "paid" | "pending";
+  unit: string;
+}
+
+export enum SchemaKey {
   MINTS = "cashu-react.mints",
   ACTIVE_UNIT = "cashu-react.activeUnit",
   ACTIVE_MINT_URL = "cashu-react.activeMintUrl",
-  PROOFS = "cashu-react.proofs",
-  SPENT_PROOFS = "cashu-react.spentProofs",
   KEYSET_COUNTERS = "cashu-react.keysetCounters",
   HISTORY_TOKENS = "cashu-react.historyTokens",
   INVOICE_HISTORY = "cashu-react.invoiceHistory",
   VERSION = "cashu-react.version",
 }
 
-export type CashuStorageKeys = {
-  [CashuStorageKey.MINTS]: Array<{
-    url: string;
-    info: GetInfoResponse;
-    keys: Array<MintKeys>;
-    keysets: Array<MintKeyset>;
-    nickname?: string;
-  }>;
-  [CashuStorageKey.ACTIVE_UNIT]: string | null;
-  [CashuStorageKey.ACTIVE_MINT_URL]: string | null;
-  [CashuStorageKey.PROOFS]: Array<Proof>;
-  [CashuStorageKey.SPENT_PROOFS]: Array<Proof>;
-  [CashuStorageKey.KEYSET_COUNTERS]: Array<{ id: string; counter: number }>;
-  [CashuStorageKey.HISTORY_TOKENS]: Array<{
-    status: "pending" | "paid";
-    token: string;
-    amount: number;
-    unit: string;
-    date: Date;
-  }>;
-  [CashuStorageKey.INVOICE_HISTORY]: Array<{
-    amount: number;
-    bolt11: string;
-    hash: string;
-    memo: string;
-    mint: string;
-    quote: string;
-    status: "paid" | "pending";
-    unit: string;
-  }>;
-  [CashuStorageKey.VERSION]: string;
-};
+export interface Schema {
+  [SchemaKey.MINTS]: Array<Mint>;
+  [SchemaKey.ACTIVE_UNIT]: string | null;
+  [SchemaKey.ACTIVE_MINT_URL]: string | null;
+  [SchemaKey.KEYSET_COUNTERS]: Array<KeysetCounter>;
+  [SchemaKey.HISTORY_TOKENS]: Array<HistoryToken>;
+  [SchemaKey.INVOICE_HISTORY]: Array<InvoiceHistoryItem>;
+  [SchemaKey.VERSION]: string;
+}
 
 export interface Storage {
-  put<K extends CashuStorageKey>(
-    key: K,
-    value: CashuStorageKeys[K]
-  ): Promise<void>;
+  put<K extends SchemaKey>(key: K, value: Schema[K]): Promise<void>;
 
-  get<K extends CashuStorageKey>(key: K): Promise<CashuStorageKeys[K]>;
+  get<K extends SchemaKey>(key: K): Promise<Schema[K]>;
 
-  delete(key: CashuStorageKey): Promise<void>;
+  delete(key: SchemaKey): Promise<void>;
 }

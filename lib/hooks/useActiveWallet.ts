@@ -1,39 +1,49 @@
-import { useCallback, useEffect } from "react";
-import { useProofStorageContext } from "./useContexts/useProofStorageContext";
-import { useWalletManager } from "./useWalletManager";
+import { useWalletManagerContext } from "./useContexts/useWalletManagerContext";
+import { useCallback, useEffect, useState } from "react";
+import { MintQuoteState } from "@cashu/cashu-ts";
+import ExtCashuWallet from "../ExtCashuWallet";
+import { logger } from "../logger";
 
 export const useActiveWallet = () => {
-  const proofStorage = useProofStorageContext();
-  const { activeWallet } = useWalletManager();
+  const manager = useWalletManagerContext();
+
+  const [activeWallet, setActiveWalletState] = useState<
+    ExtCashuWallet | undefined
+  >();
 
   useEffect(() => {
-    console.log("activeWallet", activeWallet);
-    return () => {};
-  }, [activeWallet]);
+    if (!manager.isLoaded) return;
+    setActiveWalletState(manager.activeWallet);
+  }, [manager.activeWallet, manager.isLoaded]);
 
-  const receiveLightning = useCallback(
-    async (amount: number, unit?: string) => {
-      if (!activeWallet) throw new Error("No active wallet set");
-
-      if (unit && !activeWallet.keysets.find((k) => k.unit === unit)) {
-        throw new Error(`No keyset for unit ${unit}`);
-      } else if (unit) {
-        // activeWallet.unit = unit;
-        // activeWallet.se;
-      }
-
-      const mintQuote = await activeWallet.createMintQuote(amount);
-
-      console.log(mintQuote);
-
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-
-      const { proofs } = await activeWallet.mintProofs(amount, mintQuote.quote);
-
-      await proofStorage.addProofs(proofs);
+  const setActiveWallet = useCallback(
+    async (mintUrl: string, unit?: string) => {
+      const wallet = await manager.setActiveWallet(mintUrl, unit);
+      setActiveWalletState(wallet);
     },
-    [activeWallet, proofStorage]
+    [manager]
   );
 
-  return { receiveLightning };
+  const receiveLightning = useCallback(
+    async (amount: number) => {
+      if (!activeWallet) throw new Error("No active wallet set");
+
+      const { invoice, checkingId } = await activeWallet.generateInvoice(
+        amount
+      );
+      logger.info("invoice", invoice);
+      let state;
+      do {
+        logger.debug("checking mint quote", checkingId);
+        state = await activeWallet.tryToMintProofs(checkingId);
+        if (state !== MintQuoteState.ISSUED) {
+          /* wait 2 seconds before polling again */
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      } while (state !== MintQuoteState.ISSUED);
+    },
+    [activeWallet]
+  );
+
+  return { receiveLightning, setActiveWallet, activeWallet };
 };

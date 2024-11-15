@@ -1,34 +1,35 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWalletManagerContext } from "./useContexts/useWalletManagerContext";
-import { CashuWallet } from "@cashu/cashu-ts";
 
 export const useWalletManager = () => {
-  const [activeWallet, setActiveWalletState] = useState<
-    CashuWallet | undefined
-  >();
-  const walletManager = useWalletManagerContext();
+  const manager = useWalletManagerContext();
+  const [wallets, setWallets] = useState(manager.wallets);
+
+  useEffect(() => {
+    /* Subscribe to wallet changes */
+    const unsubscribe = manager.subscribeToWalletChanges((updatedWallets) => {
+      setWallets(updatedWallets);
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [manager]);
+
+  const isLoaded = useMemo(() => {
+    return manager.isLoaded;
+  }, [manager.isLoaded]);
 
   const addMint = useCallback(
     async (mintUrl: string, units: Array<string>) => {
-      return walletManager.addWallet(mintUrl, units);
+      return manager.addWallet(mintUrl, units);
     },
-    [walletManager]
-  );
-
-  const setActiveWallet = useCallback(
-    async (mintUrl: string, unit?: string) => {
-      const wallet = await walletManager.setActiveWallet(mintUrl, unit);
-      setActiveWalletState(wallet);
-    },
-    [walletManager]
+    [manager]
   );
 
   return {
+    wallets,
+    isLoaded,
     addMint,
-    wallets: walletManager.wallets,
-    activeWallet,
-    setActiveWallet,
-    isLoaded: walletManager.isLoaded,
-    activeUnit: walletManager.activeWallet?.unit,
   };
 };

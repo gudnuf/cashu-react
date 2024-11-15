@@ -6,7 +6,7 @@ function App() {
   return (
     <div className="App">
       <img height={200} src={reactLogo} />
-      <h2>Cashu React Demo</h2>
+      <h2>Cashu React</h2>
       <HooksDemo />
     </div>
   );

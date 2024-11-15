@@ -1,7 +1,7 @@
-import { CashuStorageKey, Storage } from "../types";
+import { SchemaKey, Storage } from "../types";
 
 export class LocalStorageAdapter implements Storage {
-  async put<T>(key: CashuStorageKey, value: T): Promise<void> {
+  async put<T>(key: SchemaKey, value: T): Promise<void> {
     try {
       /* Special handling for Date objects */
       const serializedValue = JSON.stringify(value, (_, v) => {
@@ -18,7 +18,7 @@ export class LocalStorageAdapter implements Storage {
     }
   }
 
-  async get<T>(key: CashuStorageKey): Promise<T> {
+  async get<T>(key: SchemaKey): Promise<T> {
     try {
       const value = localStorage.getItem(key);
       if (value === null) {
@@ -40,7 +40,7 @@ export class LocalStorageAdapter implements Storage {
     }
   }
 
-  async delete(key: CashuStorageKey): Promise<void> {
+  async delete(key: SchemaKey): Promise<void> {
     try {
       localStorage.removeItem(key);
     } catch (error) {

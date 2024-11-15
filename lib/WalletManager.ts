@@ -1,28 +1,33 @@
-import { CashuMint, CashuWallet } from "@cashu/cashu-ts";
-import { Storage, CashuStorageKey } from "./types";
+import { CashuMint } from "@cashu/cashu-ts";
+import ExtCashuWallet from "./ExtCashuWallet";
+import { Storage, SchemaKey, InvoiceHistoryItem } from "./types";
+import { logger, type LogLevel } from "./logger";
+import { EventEmitter } from "eventemitter3";
 
 const DEFAULT_UNIT = "sat"; // TODO: make this configurable
 
 const initDB = async (storage: Storage, version: string) => {
   await Promise.all([
-    storage.put(CashuStorageKey.VERSION, version),
-    storage.put(CashuStorageKey.MINTS, []),
-    storage.put(CashuStorageKey.ACTIVE_UNIT, DEFAULT_UNIT),
-    storage.put(CashuStorageKey.ACTIVE_MINT_URL, ""),
-    storage.put(CashuStorageKey.PROOFS, []),
-    storage.put(CashuStorageKey.SPENT_PROOFS, []),
-    storage.put(CashuStorageKey.KEYSET_COUNTERS, []),
-    storage.put(CashuStorageKey.HISTORY_TOKENS, []),
-    storage.put(CashuStorageKey.INVOICE_HISTORY, []),
+    storage.put(SchemaKey.VERSION, version),
+    storage.put(SchemaKey.MINTS, []),
+    storage.put(SchemaKey.ACTIVE_UNIT, DEFAULT_UNIT),
+    storage.put(SchemaKey.ACTIVE_MINT_URL, ""),
+    storage.put(SchemaKey.KEYSET_COUNTERS, []),
+    storage.put(SchemaKey.HISTORY_TOKENS, []),
+    storage.put(SchemaKey.INVOICE_HISTORY, []),
   ]);
 };
 
 export default class CashuWalletManager {
   private _storage: Storage;
-  private _wallets: Map<string, Map<string, CashuWallet>> = new Map(); // mintUrl -> unit -> wallet
-  private _isLoaded = false;
-  private _activeWallet: CashuWallet | undefined;
+  private _wallets: Map<string, Map<string, ExtCashuWallet>> = new Map(
+    new Map()
+  ); // mintUrl -> unit -> wallet
+  private _activeWallet: ExtCashuWallet | undefined;
   private _activeUnit: string = DEFAULT_UNIT;
+  private _walletsChangeEmitter = new EventEmitter();
+
+  private _isLoaded = false;
   private _loadPromise: Promise<void> | undefined = undefined;
   private _resolveLoad: () => void = () => {};
 
@@ -38,7 +43,7 @@ export default class CashuWalletManager {
   }
 
   /* Get all wallets for a specific mint URL */
-  getWalletsByMint(mintUrl: string): Map<string, CashuWallet> | undefined {
+  getWalletsByMint(mintUrl: string): Map<string, ExtCashuWallet> | undefined {
     return this._wallets.get(mintUrl);
   }
 
@@ -59,8 +64,8 @@ export default class CashuWalletManager {
   }
 
   /* Get all wallets for a specific unit across all mints */
-  getWalletsByUnit(unit: string): Map<string, CashuWallet> {
-    const wallets = new Map<string, CashuWallet>();
+  getWalletsByUnit(unit: string): Map<string, ExtCashuWallet> {
+    const wallets = new Map<string, ExtCashuWallet>();
     this._wallets.forEach((unitWallets, mintUrl) => {
       const wallet = unitWallets.get(unit);
       if (wallet) {
@@ -70,13 +75,78 @@ export default class CashuWalletManager {
     return wallets;
   }
 
+  subscribeToBalanceChanges(
+    listener: (walletId: string, balance: number) => void
+  ) {
+    /* Check if wallets exist before iterating */
+    if (!this._isLoaded) return;
+    /* Create array of cleanup functions */
+    const cleanupFns: Array<() => void> = [];
+
+    this._wallets.forEach((unitWallets, mintUrl) => {
+      if (!unitWallets) return;
+
+      unitWallets.forEach((wallet, unit) => {
+        const handleBalanceChange = (balance: number) => {
+          listener(`${mintUrl}-${unit}`, balance);
+        };
+
+        wallet.onBalanceChange(handleBalanceChange);
+        cleanupFns.push(() => {
+          wallet.offBalanceChange(handleBalanceChange);
+        });
+      });
+    });
+
+    /* Return unsubscribe function that calls all cleanups */
+    return () => {
+      cleanupFns.forEach((cleanup) => cleanup());
+    };
+  }
+
+  subscribePendingMintQuote(listener: (quote: InvoiceHistoryItem[]) => void) {
+    if (!this._isLoaded) return;
+
+    const handlePendingMintQuote = (quote: InvoiceHistoryItem[]) => {
+      listener(quote);
+    };
+
+    this._wallets.forEach((unitWallets) => {
+      if (!unitWallets) return;
+
+      unitWallets.forEach((wallet) => {
+        wallet.onMintQuoteChange(handlePendingMintQuote);
+      });
+    });
+
+    return () => {
+      this._wallets.forEach((unitWallets) => {
+        if (!unitWallets) return;
+
+        unitWallets.forEach((wallet) => {
+          wallet.offMintQuoteChange(handlePendingMintQuote);
+        });
+      });
+    };
+  }
+
+  /* Subscribe to wallet list changes */
+  subscribeToWalletChanges(
+    listener: (wallets: Map<string, ExtCashuWallet>) => void
+  ) {
+    this._walletsChangeEmitter.on("walletsChange", listener);
+    return () => {
+      this._walletsChangeEmitter.off("walletsChange", listener);
+    };
+  }
+
   private _getWalletKey(mintUrl: string, unit: string): string {
     return `${mintUrl}-${unit}`;
   }
 
   /* Get all wallets flattened into a single map of mintUrl -> wallet */
-  get wallets(): Map<string, CashuWallet> {
-    const allWallets = new Map<string, CashuWallet>();
+  get wallets(): Map<string, ExtCashuWallet> {
+    const allWallets = new Map<string, ExtCashuWallet>();
     this._wallets.forEach((unitWallets, mintUrl) => {
       unitWallets.forEach((wallet, unit) => {
         const key = this._getWalletKey(mintUrl, unit);
@@ -102,19 +172,17 @@ export default class CashuWalletManager {
     const pkgVersion = "0.0.0 ";
     // use storage directly because version may not be defined
     const currentVersion = await this._storage
-      .get(CashuStorageKey.VERSION)
+      .get(SchemaKey.VERSION)
       .catch(() => undefined);
 
     if (!currentVersion) {
       await initDB(this._storage, pkgVersion);
     }
 
-    const acitveUnit = await this._storage.get(CashuStorageKey.ACTIVE_UNIT);
-    const activeMintUrl = await this._storage.get(
-      CashuStorageKey.ACTIVE_MINT_URL
-    );
+    const acitveUnit = await this._storage.get(SchemaKey.ACTIVE_UNIT);
+    const activeMintUrl = await this._storage.get(SchemaKey.ACTIVE_MINT_URL);
 
-    const mints = await this._storage.get(CashuStorageKey.MINTS);
+    const mints = await this._storage.get(SchemaKey.MINTS);
 
     mints.forEach(({ url, info, keys, keysets }) => {
       const mint = new CashuMint(url);
@@ -137,8 +205,7 @@ export default class CashuWalletManager {
 
       /* Create a wallet for each unit */
       keysetsByUnit.forEach((unitKeysets, unit) => {
-        const wallet = new CashuWallet(mint, {
-          unit,
+        const wallet = new ExtCashuWallet(this._storage, mint, unit, {
           keys,
           keysets: unitKeysets,
           mintInfo: info,
@@ -146,7 +213,7 @@ export default class CashuWalletManager {
 
         wallet.getKeys();
 
-        console.log("loaded wallet", wallet);
+        logger.info("loaded wallet", wallet);
 
         /* Add wallet to mint's unit map */
         this._wallets.get(url)!.set(unit, wallet);
@@ -159,6 +226,9 @@ export default class CashuWalletManager {
 
     this._isLoaded = true;
     this._resolveLoad();
+
+    /* Emit initial wallets state */
+    this._walletsChangeEmitter.emit("walletsChange", this.wallets);
   }
 
   async addWallet(mintUrl: string, units: Array<string>) {
@@ -191,8 +261,7 @@ export default class CashuWalletManager {
 
     /* Create a wallet for each supported unit */
     keysetsByUnit.forEach((unitKeysets, unit) => {
-      const wallet = new CashuWallet(mint, {
-        unit,
+      const wallet = new ExtCashuWallet(this._storage, mint, unit, {
         keys,
         keysets: unitKeysets,
         mintInfo,
@@ -205,8 +274,8 @@ export default class CashuWalletManager {
     });
 
     /* Update storage with new mint data */
-    await this._storage.put(CashuStorageKey.MINTS, [
-      ...(await this._storage.get(CashuStorageKey.MINTS)),
+    await this._storage.put(SchemaKey.MINTS, [
+      ...(await this._storage.get(SchemaKey.MINTS)),
       {
         url: mintUrl,
         info: mintInfo,
@@ -220,18 +289,29 @@ export default class CashuWalletManager {
       const firstUnit = Array.from(keysetsByUnit.keys())[0];
       await this.setActiveWallet(mintUrl, firstUnit);
     }
+
+    /* Emit updated wallets */
+    this._walletsChangeEmitter.emit("walletsChange", this.wallets);
   }
 
   setActiveWallet = async (
     mintUrl: string,
     unit: string = this._activeUnit
   ) => {
-    console.log("setActiveWallet", mintUrl, unit);
     const wallet = this._wallets.get(mintUrl)?.get(unit);
     if (!wallet) throw new Error(`No wallet found for ${mintUrl} and ${unit}`);
     this._activeWallet = wallet;
-    await this._storage.put(CashuStorageKey.ACTIVE_MINT_URL, mintUrl);
-    await this._storage.put(CashuStorageKey.ACTIVE_UNIT, unit);
+    await this._storage.put(SchemaKey.ACTIVE_MINT_URL, mintUrl);
+    await this._storage.put(SchemaKey.ACTIVE_UNIT, unit);
     return this._activeWallet;
   };
+
+  /**
+   * Sets the log level for the library.
+   * @param level The desired log level ('DEBUG', 'INFO', 'WARN', 'ERROR', 'NONE').
+   */
+  setLogLevel(level: LogLevel) {
+    logger.setLevel(level);
+    logger.info(`Log level set to ${level}.`);
+  }
 }

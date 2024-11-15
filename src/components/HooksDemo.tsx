@@ -1,11 +1,17 @@
 import { useState } from "react";
-import { useActiveWallet, useBalance, useWalletManager } from "../../lib";
+import {
+  useActiveWallet,
+  useBalance,
+  usePendingMintQuotes,
+  useWalletManager,
+} from "../../lib";
+import { formatUnit } from "../util";
 
 const HooksDemo = () => {
-  const { balance, balanceByKeysetId } = useBalance();
-  const { addMint, wallets, setActiveWallet, isLoaded, activeUnit } =
-    useWalletManager();
-  const { receiveLightning } = useActiveWallet();
+  const { balance, balanceByWallet, balanceByUnit } = useBalance();
+  const { wallets, isLoaded, addMint } = useWalletManager();
+  const { receiveLightning, setActiveWallet, activeWallet } = useActiveWallet();
+  const { pendingMintQuotes, checkMintQuote } = usePendingMintQuotes();
 
   const [mintUrl, setMintUrl] = useState("");
 
@@ -28,21 +34,31 @@ const HooksDemo = () => {
 
   return (
     <>
-      <p>Balance: {balance}</p>
       <div>
-        <select onChange={(e) => handleSetActiveWallet(e.target.value)}>
+        <h3>Total Balance: {balance}</h3>
+        <ul>
+          {Object.entries(balanceByUnit).map(([unit, balance]) => (
+            <li key={unit}>{formatUnit(unit, balance)}</li>
+          ))}
+        </ul>
+      </div>
+      <div>
+        <select
+          value={activeWallet?.id}
+          onChange={(e) => handleSetActiveWallet(e.target.value)}
+        >
           {Array.from(wallets.entries()).map(([walletKey, wallet]) => (
             <option key={walletKey} value={walletKey}>
-              {wallet.mint.mintUrl} - {balanceByKeysetId[wallet.keysetId] || 0}{" "}
-              {wallet.unit}
+              {wallet.mint.mintUrl} -{" "}
+              {formatUnit(wallet.unit, balanceByWallet[wallet.id] || 0)}
             </option>
           ))}
         </select>
       </div>
-      <div>
+      <div className="add-mint-container">
         <form onSubmit={handleAddMint}>
-          <div>
-            <label htmlFor="add-mint-url">Mint URL</label>
+          <div className="form-field">
+            {/* <label htmlFor="add-mint-url">Mint URL</label> */}
             <input
               type="text"
               id="add-mint-url"
@@ -56,8 +72,17 @@ const HooksDemo = () => {
       </div>
       <div>
         <button onClick={() => handleReceiveLightning(1000)}>
-          Receive 1000 {activeUnit}
+          Receive 1000 {activeWallet?.unit}
         </button>
+      </div>
+      <div>
+        <h3>Pending Mint Quotes</h3>
+        {pendingMintQuotes.map((quote) => (
+          <div key={quote.quote}>
+            {quote.amount} {quote.unit}{" "}
+            <button onClick={() => checkMintQuote(quote.quote)}>Check</button>
+          </div>
+        ))}
       </div>
     </>
   );
