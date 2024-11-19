@@ -8,10 +8,10 @@ import {
 import { formatUnit } from "../util";
 
 const HooksDemo = () => {
-  const { balance, balanceByWallet, balanceByUnit } = useBalance();
-  const { wallets, isLoaded, addMint } = useWalletManager();
   const { receiveLightning, setActiveWallet, activeWallet } = useActiveWallet();
   const { pendingMintQuotes, checkMintQuote } = usePendingMintQuotes();
+  const { balance, balanceByWallet, balanceByUnit } = useBalance();
+  const { wallets, isLoaded, addMint } = useWalletManager();
 
   const [mintUrl, setMintUrl] = useState("");
 
@@ -72,7 +72,7 @@ const HooksDemo = () => {
       </div>
       <div>
         <button onClick={() => handleReceiveLightning(1000)}>
-          Receive 1000 {activeWallet?.unit}
+          Mint {formatUnit(activeWallet?.unit || "", 1000)}
         </button>
       </div>
       <div>
