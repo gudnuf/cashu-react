@@ -3,6 +3,12 @@ import ExtCashuWallet from "./ExtCashuWallet";
 import { Storage, SchemaKey, InvoiceHistoryItem } from "./types";
 import { logger, type LogLevel } from "./logger";
 import { EventEmitter } from "eventemitter3";
+import {
+  BrowserLocker,
+  CashuKeyValueStore,
+  CashuStorage as CornucopiaStorage,
+  StartProofSelection,
+} from "@gudnuf/cornucopia";
 
 const DEFAULT_UNIT = "sat"; // TODO: make this configurable
 
@@ -31,7 +37,11 @@ export default class CashuWalletManager {
   private _loadPromise: Promise<void> | undefined = undefined;
   private _resolveLoad: () => void = () => {};
 
-  constructor(storage: Storage) {
+  constructor(
+    storage: Storage,
+    private _get?: (key: string) => Promise<string | null>,
+    private _put?: (key: string, value: string) => Promise<void>
+  ) {
     this._loadPromise = new Promise((resolve) => {
       this._resolveLoad = resolve;
     });
@@ -205,10 +215,22 @@ export default class CashuWalletManager {
 
       /* Create a wallet for each unit */
       keysetsByUnit.forEach((unitKeysets, unit) => {
+        const locker = new BrowserLocker(`proof-locks_${mint.mintUrl}-${unit}`);
+        let proofStorage: CornucopiaStorage<StartProofSelection> | undefined;
+        if (this._get && this._put) {
+          proofStorage = new CashuKeyValueStore(
+            mint.mintUrl,
+            unit,
+            locker,
+            this._get,
+            this._put
+          );
+        }
         const wallet = new ExtCashuWallet(this._storage, mint, unit, {
           keys,
           keysets: unitKeysets,
           mintInfo: info,
+          storage: proofStorage,
         });
 
         wallet.getKeys();

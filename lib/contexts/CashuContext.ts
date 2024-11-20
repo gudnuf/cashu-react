@@ -5,10 +5,14 @@ import { LocalStorageAdapter } from "../storage/LocalStorageAdapter";
 
 let walletManager: WalletManager;
 
-export const setupCashu = (storage?: Storage) => {
+export const setupCashu = (
+  storage?: Storage,
+  get?: (key: string) => Promise<string | null>,
+  put?: (key: string, value: string) => Promise<void>
+) => {
   storage = storage || new LocalStorageAdapter();
 
-  walletManager = new WalletManager(storage);
+  walletManager = new WalletManager(storage, get, put);
 
   walletManager.setLogLevel("debug");
 

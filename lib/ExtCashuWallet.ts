@@ -7,14 +7,19 @@ import {
   MintQuoteState,
 } from "@cashu/cashu-ts";
 import { Storage, SchemaKey, InvoiceHistoryItem } from "./types";
-import { BrowserLocker, CashuLocalStorage } from "@gudnuf/cornucopia";
+import {
+  BrowserLocker,
+  CashuLocalStorage,
+  CashuStorage as CornucopiaStorage,
+  StartProofSelection,
+} from "@gudnuf/cornucopia";
 import { EventEmitter } from "eventemitter3";
 import { logger } from "./logger";
 
 export default class ExtCashuWallet extends CashuWallet {
-  private _balanceChangeEmitter = new EventEmitter();
+  private _proofStorage: CornucopiaStorage<StartProofSelection>;
   private _mintQuoteChangeEmitter = new EventEmitter();
-  private _proofStorage: CashuLocalStorage;
+  private _balanceChangeEmitter = new EventEmitter();
   private _storage: Storage;
 
   constructor(
@@ -27,18 +32,24 @@ export default class ExtCashuWallet extends CashuWallet {
       mintInfo?: GetInfoResponse;
       bip39seed?: Uint8Array;
       denominationTarget?: number;
+      storage?: CornucopiaStorage<StartProofSelection>;
     }
   ) {
-    super(mint, { ...options, unit });
+    super(mint, {
+      keys: options?.keys,
+      keysets: options?.keysets,
+      mintInfo: options?.mintInfo,
+      bip39seed: options?.bip39seed,
+      denominationTarget: options?.denominationTarget,
+      unit,
+    });
 
     const locker = new BrowserLocker(
       `proof-locks_${this.mint.mintUrl}-${this.unit}`
     );
-    this._proofStorage = new CashuLocalStorage(
-      this.mint.mintUrl,
-      this.unit,
-      locker
-    );
+    this._proofStorage =
+      options?.storage ||
+      new CashuLocalStorage(this.mint.mintUrl, this.unit, locker);
 
     this._storage = storage;
   }
@@ -49,6 +60,12 @@ export default class ExtCashuWallet extends CashuWallet {
 
   async getBalance() {
     return this._proofStorage.getBalance();
+  }
+
+  async supportsWebSockets() {
+    return true;
+    // const mintInfo = await this.mint.getInfo();
+    // const nut17 = (mintInfo.nuts as unknown).17;
   }
 
   onBalanceChange(listener: (balance: number) => void) {
@@ -134,7 +151,7 @@ export default class ExtCashuWallet extends CashuWallet {
       return state;
     } else if (state === MintQuoteState.PAID) {
       /* invoice was paid, mint proofs */
-      const { proofs } = await this.mintProofs(pendingTx.amount, quoteId);
+      const proofs = await this.mintProofs(pendingTx.amount, quoteId);
       /* claim new proofs */
 
       await this._proofStorage.receiveProofs(proofs);
